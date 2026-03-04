@@ -1,0 +1,11 @@
+version: "3.9"
+
+services:
+  hydro_regressor:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../saved_models:/app/saved_models
