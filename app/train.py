@@ -5,7 +5,7 @@ from sklearn.preprocessing import StandardScaler
 import joblib
 import matplotlib.pyplot as plt
 
-from model import StreamflowNet
+from app.model import StreamflowNet
 from pathlib import Path
 import pandas as pd
 

@@ -9,3 +9,4 @@ services:
       - "8000:8000"
     volumes:
       - ../saved_models:/app/saved_models
+      - ../data:/app/data
