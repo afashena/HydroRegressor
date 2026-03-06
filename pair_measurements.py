@@ -10,6 +10,28 @@ ROLL_N = 3              # number of timestamps to include in rolling average
 # data directory (adjust if necessary or pass as arg)
 data_dir = Path(__file__).parent / 'data'
 
+# ---------------------------------------------------------------------------
+# 0. Ensure input files are time-ordered and save them back to disk
+# ---------------------------------------------------------------------------
+
+# some of the CSVs may not be strictly ordered by timestamp.  Read each one,
+# sort by the Date column, and overwrite (or write a new ordered version) so
+# that later steps can rely on ascending time.  This also provides a visible
+# record of the ordered files.
+for csv_file in data_dir.glob('*.csv'):
+    try:
+        df_temp = pd.read_csv(csv_file)
+    except Exception:
+        # skip non-csv or unreadable files
+        continue
+    if 'Date' in df_temp.columns:
+        df_temp['Date'] = pd.to_datetime(df_temp['Date'])
+        df_temp = df_temp.sort_values('Date').reset_index(drop=True)
+        # write the ordered dataframe back to disk using the original name
+        df_temp.to_csv(csv_file, index=False)
+        print(f"Ordered file saved: {csv_file}")
+
+
 # find the stream file (should be one)
 stream_files = list(data_dir.glob('stream-gages_*.csv'))
 if not stream_files:
