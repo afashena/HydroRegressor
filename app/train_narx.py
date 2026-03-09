@@ -139,8 +139,8 @@ def preprocess_data(csv_path: Path, train_split: float):
     # 3. Scale Data (IMPORTANT for NARX stability)
     # -------------------------------------------------
 
-    x_scaler = StandardScaler()
-    y_scaler = StandardScaler()
+    x_scaler = MinMaxScaler()
+    y_scaler = MinMaxScaler()
 
     x_scaler.fit(X)
     y_scaler.fit(y)
@@ -198,7 +198,7 @@ def create_narx_dataset(X, y) -> DataLoader:
 
     # Convert to PyTorch
     X_tensor = torch.from_numpy(X_narx)
-    y_tensor = torch.from_numpy(y_narx).unsqueeze(1)
+    y_tensor = torch.from_numpy(y_narx)
 
     dataset = TensorDataset(X_tensor, y_tensor)
     loader = DataLoader(dataset, batch_size=32, shuffle=True)
@@ -224,8 +224,8 @@ def train_nn_narx(loader: DataLoader, X_narx: np.ndarray):
             loss = nn.MSELoss()(y_pred, yb)
             loss.backward()
             optimizer.step()
-            epoch_loss += loss.item() * len(yb)
-        print(f"Epoch {epoch+1}, Loss: {epoch_loss / len(loader):.6f}")
+            epoch_loss += loss.item() / len(yb)
+        print(f"Epoch {epoch+1}, Loss: {epoch_loss / len(loader):.9f}")
         if epoch % 100 == 0 or epoch == epochs - 1:
             # Save model checkpoint every 10 epochs
             model_dir = Path(__file__).parent.parent / "saved_models"
