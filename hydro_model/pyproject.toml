@@ -15,6 +15,7 @@ dependencies = [
     "joblib",
     "matplotlib>=3.10.8",
     "sysidentpy>=0.7.0",
+    "psycopg>=3.3.3",
 ]
 
 [tool.uv]

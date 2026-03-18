@@ -6,7 +6,7 @@ RUN pip install uv
 WORKDIR /app
 
 # Copy only dependency files first (for layer caching)
-COPY pyproject.toml uv.lock ./
+COPY hydro_model/pyproject.toml hydro_model/uv.lock ./
 
 # Create virtual environment inside container
 RUN uv venv /app/.venv
@@ -15,10 +15,7 @@ RUN uv venv /app/.venv
 RUN uv sync --frozen
 
 # Copy application code
-COPY app ./app
-
-# Copy trained models
-COPY ../saved_models ./saved_models
+COPY hydro_model/app ./app
 
 # Activate virtual environment
 ENV PATH="/app/.venv/bin:$PATH"
