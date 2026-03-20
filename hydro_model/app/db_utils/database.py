@@ -39,7 +39,7 @@ class DBUpdater():
         csv_data = "\n".join(self.data)
         self.data = str.replace(csv_data, ";", ",")
 
-    def get_table_columns(self, table_name: str, cur: psycopg.Cursor):
+    def get_table_columns(self, table_name: str, cur: psycopg.Cursor) -> str:
         cur.execute("""
                 SELECT string_agg(column_name, ', ' ORDER BY ordinal_position)
                 FROM information_schema.columns
@@ -111,7 +111,7 @@ class DBQuerier():
     def __init__(self, conn_info: str):
         self.conn_info = conn_info
 
-    def get_data_from_range(self, table_name: str, site_id: int, timestamp: datetime | list[datetime], ineq: Literal["before", "after"] = "before"):
+    def get_data_from_range(self, table_name: str, site_id: int, timestamp: datetime | list[datetime] = datetime.now(), ineq: Literal["before", "after"] = "before"):
         
         # in the case where you want data from either before or after a single timestamp
         if ineq == "before":
@@ -151,5 +151,5 @@ class DB():
 if __name__ == "__main__":
     db = DB()
     #db.updater.update_db()
-    db.querier.get_data_from_range(table_name="rain_gage_data", site_id=35771767874133., timestamp=datetime(2026, 2, 15))
+    db.querier.get_data_from_range(table_name="rain_gage_data", site_id=35771767874133)
     print("Done!")
