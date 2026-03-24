@@ -92,18 +92,10 @@ def merge_rain_and_stream():
     return combined
 
 
-def preprocess_data(csv_path: Path, train_split: float):
-
-    # -------------------------------------------------
-    # 1. Load Data
-    # -------------------------------------------------
+def preprocess_data(csv_path: Path, model_dir: Path, train_split: float):
 
     # merge all synced CSVs into a single DataFrame
     df = merge_rain_and_stream()
-
-    # -------------------------------------------------
-    # 1.5. Create Rolling Sum Features
-    # -------------------------------------------------
 
     rain_columns = [col for col in df.columns if "rain" in col.lower()]
     
@@ -159,15 +151,16 @@ def preprocess_data(csv_path: Path, train_split: float):
     y_train = y_scaled[:split_index]
     y_test = y_scaled[split_index:]
 
-    # get correlation
-    # for i in range(X_train.shape[1]):
-    #     corr = np.correlate(X_train[:, i], y_train.flatten(), mode="full")
-    #     lag = corr.argmax() - len(X_train)
-    #     print(f"Max correlation for feature {i} at lag {lag} timesteps")
+    # Save scalers
+    with open(model_dir / "x_scaler.pkl", "wb") as f:
+        pickle.dump(x_scaler, f)
+
+    with open(model_dir / "y_scaler.pkl", "wb") as f:
+        pickle.dump(y_scaler, f)
 
     return X_train, y_train, X_test, y_test, x_scaler, y_scaler
 
-def build_narx_arrays(X, y, y_lag=10, x_lag=10):
+def build_narx_arrays(X, y, y_lag=Y_LAG, x_lag=X_LAG):
     """Create NARX arrays from raw timeseries data.
 
     X: (N, n_sensors)
@@ -423,10 +416,6 @@ def main(csv_path: Path, train_split: float):
     # you can invoke the evaluation helpers below if desired
     evaluate_nn_test(model, X_train, y_train, X_test, y_test, y_scaler)
     evaluate_nn_training(model, X_train, y_train, y_scaler)
-
-    # train_model(X_train, y_train, x_scaler, y_scaler)
-    # evaluate_model(X_train, y_train, X_test, y_test)
-    # evaluate_on_training(X_train, y_train)
 
 if __name__ == "__main__":
     csv_path = Path("path_to_your_data.csv")
