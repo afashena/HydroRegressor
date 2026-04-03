@@ -1,0 +1,9 @@
+{
+    "model_dir": "/app/saved_models", 
+    "model_name": "narx_nn_epoch_100.pth",
+    "x_scaler_name": "x_scaler.pkl",
+    "y_scaler_name": "y_scaler.pkl",
+    "sample_time": 10,
+    "X_lag": 10, 
+    "y_lag": 10
+}

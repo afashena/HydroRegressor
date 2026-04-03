@@ -15,6 +15,8 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
+from app.db_utils.pair_measurements import process_gage_data
+from app.config import Config
 from app.model import NeuralNARX
 
 # Configurable rolling window sizes (in timesteps) for rolling sum features
@@ -24,71 +26,62 @@ X_LAG = 10
 Y_LAG = 10
 
 
-def merge_rain_gages():
+def merge_rain_gages(rain_dfs: list[pd.DataFrame], site_ids: list[str]) -> pd.DataFrame:
     """
-    Merge all synced rain-gages CSVs from data/paired into a single DataFrame.
-    Keeps only one timestamp column and combines all rain amount columns.
-    
+    Merge multiple rain-gage DataFrames into a single DataFrame.
+
+    Args:
+        rain_dfs (list[pd.DataFrame]): List of rain-gage DataFrames.
+        site_ids (list[str]): List of site IDs corresponding to the DataFrames.
+
     Returns:
-        pd.DataFrame: Merged dataframe with Date and all rain columns
+        pd.DataFrame: Merged DataFrame with Date and rain columns.
     """
-    paired_dir = Path(__file__).parent.parent / 'data' / 'paired'
-    
-    # Find all synced rain-gages files
-    rain_files = sorted(paired_dir.glob('rain-gages_*_synced.csv'))
-    if not rain_files:
-        raise RuntimeError(f"No synced rain-gages files found in {paired_dir}")
-    
-    print(f"Merging {len(rain_files)} rain-gages files...")
-    
-    # Load first file
-    merged = pd.read_csv(rain_files[0], parse_dates=['Date'])
-    site_id = rain_files[0].stem.replace('rain-gages_', '').replace('_synced', '')
-    merged = merged.rename(columns={'Rain Amount (in)': f'rain_{site_id}'})
-    
-    # Merge remaining files
-    for rf in rain_files[1:]:
-        df = pd.read_csv(rf, parse_dates=['Date'])
-        site_id = rf.stem.replace('rain-gages_', '').replace('_synced', '')
-        df = df.rename(columns={'Rain Amount (in)': f'rain_{site_id}'})
-        merged = merged.merge(df, on='Date', how='inner')
-    
+    if not rain_dfs or not site_ids or len(rain_dfs) != len(site_ids):
+        raise ValueError("Mismatch between rain DataFrames and site IDs.")
+
+    print(f"Merging {len(rain_dfs)} rain-gages DataFrames...")
+
+    # Start with the first DataFrame
+    merged = rain_dfs[0].rename(columns={"rain_amount": f"rain_{site_ids[0]}"})
+
+    # Merge remaining DataFrames
+    for df, site_id in zip(rain_dfs[1:], site_ids[1:]):
+        df = df.rename(columns={"rain_amount": f"rain_{site_id}"})
+        merged = merged.merge(df, on="collect_date", how="inner")
+
     print(f"Merged shape: {merged.shape}")
     print(f"Columns: {list(merged.columns)}")
-    
+
     return merged
 
 
-def merge_rain_and_stream():
+def merge_rain_and_stream(rain_dfs: list[pd.DataFrame], site_ids: list[str], stream_df: pd.DataFrame) -> pd.DataFrame:
     """
-    Merge all synced rain-gages CSVs with the synced stream-gages CSV.
-    Returns a combined dataframe with Date, all rain columns, and Stage.
-    
+    Merge rain-gage DataFrames with a stream-gage DataFrame.
+
+    Args:
+        rain_dfs (list[pd.DataFrame]): List of rain-gage DataFrames.
+        site_ids (list[str]): List of site IDs corresponding to the rain DataFrames.
+        stream_df (pd.DataFrame): Stream-gage DataFrame.
+
     Returns:
-        pd.DataFrame: Combined dataframe with Date, rain columns, and Stage
+        pd.DataFrame: Combined DataFrame with Date, rain columns, and Stage.
     """
-    paired_dir = Path(__file__).parent.parent / 'data' / 'paired'
-    
-    # Load stream data
-    stream_files = list(paired_dir.glob('stream-gages_*_synced.csv'))
-    if not stream_files:
-        raise RuntimeError(f"No synced stream-gages file found in {paired_dir}")
-    
-    combined = pd.read_csv(stream_files[0], parse_dates=['Date'])
-    
-    # Load and merge rain files
-    rain_files = sorted(paired_dir.glob('rain-gages_*_synced.csv'))
-    for rf in rain_files:
-        df = pd.read_csv(rf, parse_dates=['Date'])
-        site_id = rf.stem.replace('rain-gages_', '').replace('_synced', '')
-        df = df.rename(columns={'Rain Amount (in)': f'rain_{site_id}'})
-        combined = combined.merge(df, on='Date', how='inner')
-    
+    if not rain_dfs or not site_ids or len(rain_dfs) != len(site_ids):
+        raise ValueError("Mismatch between rain DataFrames and site IDs.")
+
+    print("Merging rain-gages with stream-gages...")
+
+    # Merge rain DataFrames
+    merged_rain = merge_rain_gages(rain_dfs, site_ids)
+
+    # Merge with stream DataFrame
+    combined = stream_df.merge(merged_rain, on="collect_date", how="inner")
+
     print(f"Combined data shape: {combined.shape}")
     print(f"Columns: {list(combined.columns)}")
 
-    combined.to_csv(paired_dir / "combined_data.csv", index=False)
-    
     return combined
 
 
@@ -160,7 +153,7 @@ def preprocess_data(csv_path: Path, model_dir: Path, train_split: float):
 
     return X_train, y_train, X_test, y_test, x_scaler, y_scaler
 
-def build_narx_arrays(X, y, y_lag=Y_LAG, x_lag=X_LAG):
+def build_narx_arrays(X, y, y_lag, x_lag):
     """Create NARX arrays from raw timeseries data.
 
     X: (N, n_sensors)
@@ -174,9 +167,9 @@ def build_narx_arrays(X, y, y_lag=Y_LAG, x_lag=X_LAG):
     X_narx = []
     y_narx = []
 
-    for t in range(max(Y_LAG, X_LAG), N):
-        y_features = y[t - Y_LAG:t].flatten()       # past storm drain values
-        x_features = X[t - X_LAG:t].flatten()  # past rain sensor values
+    for t in range(max(y_lag, x_lag), N):
+        y_features = y[t - y_lag:t].flatten()       # past storm drain values
+        x_features = X[t - x_lag:t].flatten()  # past rain sensor values
         X_narx.append(np.concatenate([y_features, x_features]))
         y_narx.append(y[t])
 
@@ -228,133 +221,11 @@ def train_nn_narx(loader: DataLoader, X_narx: np.ndarray):
     return model
 
 
-def train_model(X_train, y_train, x_scaler, y_scaler):
-
-    # -------------------------------------------------
-    # 5. Define NARX Model
-    # -------------------------------------------------
-
-    model = FROLS(
-        order_selection=True,
-        n_info_values=15,       # model complexity cap
-        ylag=20,                 # past 20 storm drain values
-        xlag=[10, 10],   # past 10 rain values (each is 10 min apart)
-        basis_function=Polynomial(degree=1),
-        #estimator=LeastSquares(),      # IMPORTANT for stability
-        estimator=RidgeRegression(alpha=0.01)
-    )
-
-    # -------------------------------------------------
-    # 6. Train Model
-    # -------------------------------------------------
-
-    model.fit(X=X_train, y=y_train)
-    print(model.final_model)
-
-    model_dir = Path(__file__).parent.parent / "saved_models"
-    model_dir.mkdir(exist_ok=True)
-
-    # Save the trained model
-    with open(model_dir / "narx_model.pkl", "wb") as f:
-        pickle.dump(model, f)
-
-    # Save scalers
-    with open(model_dir / "x_scaler.pkl", "wb") as f:
-        pickle.dump(x_scaler, f)
-
-    with open(model_dir / "y_scaler.pkl", "wb") as f:
-        pickle.dump(y_scaler, f)
-
-def evaluate_model(X_train, y_train, X_test, y_test):
-    # this function runs inference on the scaled test set
-
-    model_dir = Path(__file__).parent.parent / "saved_models"
-
-    # Load model
-    with open(model_dir / "narx_model.pkl", "rb") as f:
-        model: FROLS = pickle.load(f)
-
-    # Load scalers
-    with open(model_dir / "y_scaler.pkl", "rb") as f:
-        y_scaler: MinMaxScaler = pickle.load(f)
-
-    # For NARX with lag, we need to prepend the last lag values from train to test
-    y_lag = 20  # ylag from model
-    xlag = 10  # xlag from model
-    lag = max(y_lag, xlag)
-    X_test_full = np.vstack([X_train[-lag:], X_test])
-    y_test_full = np.vstack([y_train[-lag:], y_test])
-
-    y_pred_full = model.predict(X=X_test_full, y=y_test_full)
-
-    # Take only the predictions for the test set
-    y_pred = y_pred_full[lag:]
-
-    # Reverse scaling
-    y_pred_rescaled = y_scaler.inverse_transform(y_pred)
-    y_test_rescaled = y_scaler.inverse_transform(y_test)
-
-    # -------------------------------------------------
-    # 8. Evaluate
-    # -------------------------------------------------
-
-    mse = mean_squared_error(y_test_rescaled, y_pred_rescaled)
-    print(f"MSE: {mse}")
-
-    # -------------------------------------------------
-    # 9. Plot Results
-    # -------------------------------------------------
-
-    plt.figure()
-    plt.plot(y_test_rescaled, label="Actual")
-    plt.plot(y_pred_rescaled, label="Predicted")
-    plt.legend()
-    plt.title("Storm Drain Prediction (NARX)")
-    plt.grid(True)
-    plt.savefig(model_dir / "narx_predictions.png", dpi=150)
-
-
-def evaluate_on_training(X_train, y_train):
-    """Run the trained model on the training set and report/plot results.
-
-    This is useful to verify the model is actually fitting the data rather than
-    just producing flat predictions.
-    """
-    model_dir = Path(__file__).parent.parent / "saved_models"
-
-    # load model and scalers
-    with open(model_dir / "narx_model.pkl", "rb") as f:
-        model: FROLS = pickle.load(f)
-    with open(model_dir / "y_scaler.pkl", "rb") as f:
-        y_scaler: MinMaxScaler = pickle.load(f)
-
-    # prediction on training set (no need to prepend extra lag because y_train
-    # already contains the necessary history for itself)
-    y_pred_scaled = model.predict(X=X_train, y=y_train)
-
-    # reverse scaling
-    y_pred = y_scaler.inverse_transform(y_pred_scaled)
-    y_actual = y_scaler.inverse_transform(y_train)
-
-    mse = mean_squared_error(y_actual, y_pred)
-    print(f"Training MSE: {mse}")
-
-    # plot and save
-    plt.figure()
-    plt.plot(y_actual, label="Actual (train)")
-    plt.plot(y_pred, label="Predicted (train)")
-    plt.legend()
-    plt.title("NARX Fit on Training Data")
-    plt.grid(True)
-    plt.savefig(model_dir / "narx_train_predictions.png", dpi=150)
-    plt.close()
-
-
 # -------------------------------------------------
 # Neural NARX evaluation helpers
 # -------------------------------------------------
 
-def _evaluate_nn(model, X_narx: np.ndarray, y_narx: np.ndarray, y_scaler, save_path, title: str):
+def _evaluate_nn(model, X_narx: np.ndarray, y_narx: np.ndarray, y_scaler, title: str, save_path=None):
     """Internal helper to run forward pass and plot results."""
     model.eval()
     with torch.no_grad():
@@ -368,15 +239,16 @@ def _evaluate_nn(model, X_narx: np.ndarray, y_narx: np.ndarray, y_scaler, save_p
     mse = mean_squared_error(y_true, y_pred)
     print(f"{title} MSE: {mse}")
 
-    plt.figure()
-    plt.plot(y_true, label="Actual")
-    plt.plot(y_pred, label="Predicted")
-    plt.legend()
-    plt.title(title)
-    plt.grid(True)
-    plt.savefig(save_path, dpi=150)
-    plt.close()
-    return mse
+    # plt.figure()
+    # plt.plot(y_true, label="Actual")
+    # plt.plot(y_pred, label="Predicted")
+    # plt.legend()
+    # plt.title(title)
+    # plt.grid(True)
+    # if save_path:
+    #     plt.savefig(save_path, dpi=150)
+    # plt.close()
+    return y_pred, y_true, mse
 
 
 def evaluate_nn_test(model, X_train, y_train, X_test, y_test, y_scaler):
@@ -407,9 +279,42 @@ def evaluate_nn_training(model, X_train, y_train, y_scaler, y_lag=Y_LAG, x_lag=X
     return _evaluate_nn(model, X_narx, y_narx, y_scaler, save_path,
                         "NNARX Fit on Training Data")
 
+def test_forecast(X_recent: list[pd.Dataframe], y_recent: pd.DataFrame, config: Config):
+    """Use the trained NARX model to forecast future values given recent history."""
 
-def main(csv_path: Path, train_split: float):
-    X_train, y_train, X_test, y_test, x_scaler, y_scaler = preprocess_data(csv_path, train_split)
+    # load model and scalers
+    model = NeuralNARX(input_size=len(X_recent) * config.X_lag + config.y_lag)
+    model.load_state_dict(torch.load(config.model_dir / config.model_name))
+
+    with open(config.model_dir / config.x_scaler_name, "rb") as f:
+        x_scaler: MinMaxScaler = pickle.load(f)   
+    with open(config.model_dir / config.y_scaler_name, "rb") as f:
+        y_scaler: MinMaxScaler = pickle.load(f)
+    
+    # first sync values
+    stream_out_df, rain_out_dfs = process_gage_data(rain_dfs=X_recent, stream_df=y_recent[0])
+
+    df = merge_rain_and_stream(rain_out_dfs, [f"site_{i}" for i in range(len(rain_out_dfs))], stream_out_df)
+
+    rain_columns = [col for col in df.columns if "rain" in col.lower()]
+    target_column = "stage"
+    X = df[rain_columns].values
+    y = df[target_column].values.reshape(-1, 1)
+
+    X = x_scaler.transform(X)
+    y = y_scaler.transform(y)
+
+    # then build NARX input arrays
+    X_narx, y_narx = build_narx_arrays(X, y, y_lag=config.y_lag, x_lag=config.X_lag)
+
+    #save_path = config.model_dir / "narx_nn_test_forecast.png"
+
+    return _evaluate_nn(model, X_narx, y_narx, y_scaler,
+                        "NNARX Forecast Test")
+
+
+def main(csv_path: Path, train_split: float, model_dir: Path):
+    X_train, y_train, X_test, y_test, x_scaler, y_scaler = preprocess_data(csv_path, model_dir, train_split)
     data_loader, X_narx = create_narx_dataset(X_train, y_train)
     model = train_nn_narx(data_loader, X_narx)
 
@@ -418,6 +323,7 @@ def main(csv_path: Path, train_split: float):
     evaluate_nn_training(model, X_train, y_train, y_scaler)
 
 if __name__ == "__main__":
-    csv_path = Path("path_to_your_data.csv")
+    csv_path = Path(r"/app/data/paired/combined_data.csv")
+    model_dir = Path(r"/app/saved_models")
     train_split = 0.9
-    main(csv_path, train_split)
+    main(csv_path, train_split, model_dir)
